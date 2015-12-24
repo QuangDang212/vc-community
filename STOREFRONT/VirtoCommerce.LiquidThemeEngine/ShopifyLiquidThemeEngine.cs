@@ -34,25 +34,27 @@ namespace VirtoCommerce.LiquidThemeEngine
     /// </summary>
     public class ShopifyLiquidThemeEngine : IFileSystem
     {
-        private const string _defaultThemeName = "default";
+        private const string _globalThemeName = "default";
         private const string _defaultMasterView = "theme";
         private const string _liquidTemplateFormat = "{0}.liquid";
         private static readonly string[] _templatesDiscoveryFolders = { "templates", "snippets", "layout", "assets" };
         private static readonly Regex _templateRegex = new Regex(@"[a-zA-Z0-9]+$", RegexOptions.Compiled);
         private readonly string _themesLocalPath;
         private readonly string _themesAssetsRelativeUrl;
+        private readonly string _globalThemeAssetsRelativeUrl;
         private readonly Func<WorkContext> _workContextFactory;
         private readonly Func<IStorefrontUrlBuilder> _storeFrontUrlBuilderFactory;
         private readonly ICacheManager<object> _cacheManager;
         private readonly FileSystemWatcher _fileSystemWatcher;
         private readonly SassCompilerProxy _compiler = new SassCompilerProxy();
 
-        public ShopifyLiquidThemeEngine(ICacheManager<object> cacheManager, Func<WorkContext> workContextFactory, Func<IStorefrontUrlBuilder> storeFrontUrlBuilderFactory, string themesLocalPath, string themesAssetsRelativeUrl)
+        public ShopifyLiquidThemeEngine(ICacheManager<object> cacheManager, Func<WorkContext> workContextFactory, Func<IStorefrontUrlBuilder> storeFrontUrlBuilderFactory, string themesLocalPath, string themesAssetsRelativeUrl, string globalThemeAssetsRelativeUrl)
         {
             _workContextFactory = workContextFactory;
             _storeFrontUrlBuilderFactory = storeFrontUrlBuilderFactory;
             _themesLocalPath = themesLocalPath;
             _themesAssetsRelativeUrl = themesAssetsRelativeUrl;
+            _globalThemeAssetsRelativeUrl = globalThemeAssetsRelativeUrl;
             _cacheManager = cacheManager;
 
             Liquid.UseRubyDateFormat = true;
@@ -112,7 +114,7 @@ namespace VirtoCommerce.LiquidThemeEngine
         {
             get
             {
-                return WorkContext.CurrentStore.ThemeName ?? _defaultThemeName;
+                return WorkContext.CurrentStore.ThemeName ?? _globalThemeName;
             }
         }
 
@@ -128,13 +130,13 @@ namespace VirtoCommerce.LiquidThemeEngine
             }
         }
         /// <summary>
-        /// Default theme local path
+        /// Global theme local path
         /// </summary>
-        private string DefaultThemeLocalPath
+        private string GlobalThemeLocalPath
         {
             get
             {
-                return Path.Combine(_themesLocalPath, _defaultThemeName);
+                return Path.Combine(_themesLocalPath, _globalThemeName);
             }
         }
 
@@ -150,20 +152,21 @@ namespace VirtoCommerce.LiquidThemeEngine
         /// </summary>
         /// <param name="fileName"></param>
         /// <returns></returns>
-        public Stream GetAssetStream(string fileName)
+        public Stream GetAssetStream(string fileName, bool searchInGlobalThemeOnly = false)
         {
             Stream retVal = null;
             var fileExtensions = System.IO.Path.GetExtension(fileName);
-            var assetPath = CurrentThemeLocalPath + "\\assets";
+            var assetPath = (searchInGlobalThemeOnly ? GlobalThemeLocalPath : CurrentThemeLocalPath) + "\\assets";
             string[] files = null;
             if (Directory.Exists(assetPath))
             {
                 files = Directory.GetFiles(assetPath, fileName, SearchOption.AllDirectories);
             }
-            if(files == null || !files.Any())
+
+            if(!searchInGlobalThemeOnly && (files == null || !files.Any()))
             {
                 //Try to find asset in default theme
-                assetPath = DefaultThemeLocalPath + "\\assets";
+                assetPath = GlobalThemeLocalPath + "\\assets";
                 if (Directory.Exists(assetPath))
                 {
                     files = Directory.GetFiles(assetPath, fileName, SearchOption.AllDirectories);
@@ -204,6 +207,28 @@ namespace VirtoCommerce.LiquidThemeEngine
         }
 
         /// <summary>
+        /// resolve  template path by it name
+        /// </summary>
+        /// <param name="templateName"></param>
+        /// <returns></returns>
+        public string ResolveTemplatePath(string templateName)
+        {
+            if (WorkContext.CurrentStore == null)
+                return null;
+
+            var curentThemediscoveryPaths = _templatesDiscoveryFolders.Select(x => Path.Combine(CurrentThemeLocalPath, x, String.Format(_liquidTemplateFormat, templateName)));
+            //First try to find template in current theme folder
+            var retVal = curentThemediscoveryPaths.FirstOrDefault(x => File.Exists(x));
+            if (retVal == null && GlobalThemeLocalPath != CurrentThemeLocalPath)
+            {
+                //Then try to find in global theme
+                var globalThemeDiscoveyPaths = _templatesDiscoveryFolders.Select(x => Path.Combine(GlobalThemeLocalPath, x, String.Format(_liquidTemplateFormat, templateName)));
+                retVal = globalThemeDiscoveyPaths.FirstOrDefault(x => File.Exists(x));
+            }
+            return retVal;
+        }
+
+        /// <summary>
         /// Read template by name
         /// </summary>
         /// <param name="templateName"></param>
@@ -216,24 +241,11 @@ namespace VirtoCommerce.LiquidThemeEngine
 
         private string InnerReadTemplateByName(string templateName)
         {
-            if (templateName == null || !_templateRegex.IsMatch(templateName))
-                throw new FileSystemException("Error - Illegal template name '{0}'", templateName);
-
-            var curentThemediscoveryPaths = _templatesDiscoveryFolders.Select(x => Path.Combine(CurrentThemeLocalPath, x, String.Format(_liquidTemplateFormat, templateName)));
-            //First try to find template in current theme folder
-            var existTemplatePath = curentThemediscoveryPaths.FirstOrDefault(x => File.Exists(x));
-            if (existTemplatePath == null && DefaultThemeLocalPath != CurrentThemeLocalPath)
+            var templatePath = ResolveTemplatePath(templateName);
+            if (!String.IsNullOrEmpty(templatePath) && File.Exists(templatePath))
             {
-                //Then try to find in default theme
-                var defaultThemeDiscoveyPaths = _templatesDiscoveryFolders.Select(x => Path.Combine(DefaultThemeLocalPath, x, String.Format(_liquidTemplateFormat, templateName)));
-                existTemplatePath = defaultThemeDiscoveyPaths.FirstOrDefault(x => File.Exists(x));
+                return File.ReadAllText(templatePath);
             }
-
-            if (existTemplatePath != null)
-            {
-                return File.ReadAllText(existTemplatePath);
-            }
-
             throw new FileSystemException("Error - No such template {0} . Looked in the following locations:<br />{1}", templateName, CurrentThemeName);
         }
 
@@ -294,8 +306,8 @@ namespace VirtoCommerce.LiquidThemeEngine
              {
                  DefaultableDictionary retVal = new DefaultableDictionary(defaultValue);
 
-                 var resultSettings = InnerGetSettings(DefaultThemeLocalPath);
-                 if (DefaultThemeLocalPath != CurrentThemeLocalPath)
+                 var resultSettings = InnerGetSettings(GlobalThemeLocalPath);
+                 if (GlobalThemeLocalPath != CurrentThemeLocalPath)
                  {
                      var currentThemeSettings = InnerGetSettings(CurrentThemeLocalPath);
                      if (currentThemeSettings != null)
@@ -341,8 +353,8 @@ namespace VirtoCommerce.LiquidThemeEngine
             return _cacheManager.Get(GetCacheKey("ReadLocalization"), "LiquidThemeRegion", () =>
             {
                 //Load first localization from default theme
-                var retVal = InnerReadLocalization(DefaultThemeLocalPath, WorkContext.CurrentLanguage);
-                if (DefaultThemeLocalPath != CurrentThemeLocalPath)
+                var retVal = InnerReadLocalization(GlobalThemeLocalPath, WorkContext.CurrentLanguage);
+                if (GlobalThemeLocalPath != CurrentThemeLocalPath)
                 {
                     //Next need merge current theme localization with default
                     var currentThemeLocalization = InnerReadLocalization(CurrentThemeLocalPath, WorkContext.CurrentLanguage);
@@ -397,9 +409,19 @@ namespace VirtoCommerce.LiquidThemeEngine
             return UrlBuilder.ToAppAbsolute(_themesAssetsRelativeUrl.TrimEnd('/') + "/" + assetName.TrimStart('/'), WorkContext.CurrentStore, WorkContext.CurrentLanguage);
         }
 
+        /// <summary>
+        /// Get relative url for global assets
+        /// </summary>
+        /// <param name="assetName"></param>
+        /// <returns></returns>
+        public string GetGlobalAssetAbsoluteUrl(string assetName)
+        {
+            return UrlBuilder.ToAppAbsolute(_globalThemeAssetsRelativeUrl.TrimEnd('/') + "/" + assetName.TrimStart('/'), WorkContext.CurrentStore, WorkContext.CurrentLanguage);
+        }
+
         private string GetCacheKey(params string[] parts)
         {
-            var retVal = new string[] { CurrentThemeLocalPath, DefaultThemeLocalPath, WorkContext.CurrentLanguage.CultureName, WorkContext.CurrentCurrency.Code };
+            var retVal = new string[] { CurrentThemeLocalPath, GlobalThemeLocalPath, WorkContext.CurrentLanguage.CultureName, WorkContext.CurrentCurrency.Code };
             if (parts != null)
             {
                 retVal = retVal.Concat(parts.Select(x => x == null ? String.Empty : x)).ToArray();
@@ -411,27 +433,29 @@ namespace VirtoCommerce.LiquidThemeEngine
         {
             var fileSystemWatcher = new FileSystemWatcher();
 
-            fileSystemWatcher.Path = _themesLocalPath;
-            fileSystemWatcher.IncludeSubdirectories = true;
-
-            FileSystemEventHandler handler = (sender, args) =>
+            if (Directory.Exists(_themesLocalPath))
             {
-                _cacheManager.Clear();
-            };
-            RenamedEventHandler renamedHandler = (sender, args) =>
-            {
-                _cacheManager.Clear();
-            };
-            var throttledHandler = handler.Throttle(TimeSpan.FromSeconds(5));
-            // Add event handlers.
-            fileSystemWatcher.Changed += throttledHandler;
-            fileSystemWatcher.Created += throttledHandler;
-            fileSystemWatcher.Deleted += throttledHandler;
-            fileSystemWatcher.Renamed += renamedHandler;
+                fileSystemWatcher.Path = _themesLocalPath;
+                fileSystemWatcher.IncludeSubdirectories = true;
 
-            // Begin watching.
-            fileSystemWatcher.EnableRaisingEvents = true;
+                FileSystemEventHandler handler = (sender, args) =>
+                {
+                    _cacheManager.Clear();
+                };
+                RenamedEventHandler renamedHandler = (sender, args) =>
+                {
+                    _cacheManager.Clear();
+                };
+                var throttledHandler = handler.Throttle(TimeSpan.FromSeconds(5));
+                // Add event handlers.
+                fileSystemWatcher.Changed += throttledHandler;
+                fileSystemWatcher.Created += throttledHandler;
+                fileSystemWatcher.Deleted += throttledHandler;
+                fileSystemWatcher.Renamed += renamedHandler;
 
+                // Begin watching.
+                fileSystemWatcher.EnableRaisingEvents = true;
+            }
             return fileSystemWatcher;
         }
 

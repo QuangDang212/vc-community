@@ -1,4 +1,5 @@
 ﻿using Omu.ValueInjecter;
+using System.Collections.Generic;
 using System.Linq;
 using VirtoCommerce.LiquidThemeEngine.Objects;
 using VirtoCommerce.Platform.Core.Common;
@@ -91,11 +92,10 @@ namespace VirtoCommerce.LiquidThemeEngine.Converters
                 result.FeaturedImage.AttachedToVariant = true;
                 result.FeaturedImage.Variants = new[] { result };
             }
+            result.Id = product.Id;
             result.InventoryPolicy = "continue";
             result.InventoryQuantity = product.Inventory != null ? product.Inventory.InStockQuantity ?? 0 : 0;
-            result.Options = product.Properties.Where(x => string.Equals(x.Type, "variation", System.StringComparison.InvariantCultureIgnoreCase) && x.Value != null)
-                                               .Select(x => string.Join(";", x.Value)).ToArray();
-
+             result.Options = product.VariationProperties.Select(p => p.Value).ToArray();
             result.CompareAtPrice = product.Price.ListPrice.Amount;
             result.Price = product.Price.SalePrice.Amount;
             if (product.Price.ActiveDiscount != null)
@@ -116,8 +116,5 @@ namespace VirtoCommerce.LiquidThemeEngine.Converters
             result.WeightUnit = product.WeightUnit;
             return result;
         }
-
-      
     }
 }
-

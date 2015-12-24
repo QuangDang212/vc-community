@@ -2207,6 +2207,19 @@ $shareBorderColor: #ececec;
   }
 }
 
+.cartCount {
+    display: inline-block;
+    text-align: center;
+    background-color: #ffea00;
+    color: #204a80;
+    font-weight: 700;
+    font-size: 13px;
+    min-width: 20px;
+    height: 20px;
+    line-height: 20px;
+    border-radius: 20px;
+}
+
 .search-bar {
   position: relative;
   max-width: 60%;
@@ -2363,7 +2376,7 @@ $shareBorderColor: #ececec;
   .nav-bar {
     position: fixed;
 
-    z-index: 2000;
+    z-index: 99999;
     @include transition(all 600ms cubic-bezier(0.47, 0.5, 0, 0.95));
 
     .show-nav & {
@@ -2461,7 +2474,7 @@ $shareBorderColor: #ececec;
     opacity: 0;
     overflow: hidden;
     visibility: hidden;
-    z-index: 20;
+    z-index: 99999;
     @include transition(all 150ms);
 
     .no-touch .site-nav--has-dropdown:hover &,
@@ -2564,12 +2577,11 @@ $shareBorderColor: #ececec;
   }
 
   .ajaxify-modal .ajaxifyCart--content {
-    margin-top: $mobileNavBarHeight;
     margin-bottom: - $mobileNavBarHeight;
   }
 
   .ajaxifyCart--close {
-    display: none!important;
+    
   }
 }
 
